@@ -174,3 +174,6 @@ newman/
 # Службові файли системи
 .DS_Store
 Thumbs.db
+# Hotels API working database (recreated by npm run db:reset)
+api/hotel.local.db
+api/hotel.local.db-*

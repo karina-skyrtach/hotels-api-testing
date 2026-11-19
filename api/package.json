@@ -1,0 +1,15 @@
+{
+  "name": "hotels-api",
+  "version": "1.0.0",
+  "description": "REST API for Grand Carpathian Hotel (learning project for API testing)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
+    "db:reset": "node --disable-warning=ExperimentalWarning scripts/db-reset.js"
+  }
+}

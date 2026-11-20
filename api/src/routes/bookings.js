@@ -2,9 +2,9 @@
 import { route } from '../app.js';
 import { getDb, transaction } from '../db.js';
 import { ApiError, conflict, notFound, referenceNotFound } from '../lib/errors.js';
-import { hoursUntilCheckIn, isValidDate, nowDateTime, today } from '../lib/dates.js';
+import { isValidDate, nowDateTime, today } from '../lib/dates.js';
 import {
-  bookingCard, calcRoomTotal, getBookingByCode, isRoomFree, paymentSummary, requireValidPromo, roundMoney, validateStay,
+  bookingCard, calcRoomTotal, getBookingByCode, isRoomFree, paymentSummary, requireValidPromo, validateStay,
 } from '../lib/hotel.js';
 import {
   Validator, isPositiveInt, paginated, parseBookingCode, parseIntStrict, readPagination, readQuery,
@@ -199,19 +199,12 @@ route('POST', '/bookings', ({ body }) => {
   return { status: 201, body: bookingCard(bookingId) };
 }, { body: true });
 
-// Штраф за скасування залежно від політики тарифу і часу до заїзду
+// Штраф за скасування: тариф з поверненням (is_refundable = 1) → 0, без повернення → 100% room_total
 function calcPenalty(booking) {
-  const policy = getDb()
-    .prepare('SELECT cp.* FROM rate_plans rp JOIN cancellation_policies cp ON cp.policy_id = rp.policy_id WHERE rp.rate_plan_id = ?')
+  const { is_refundable: refundable } = getDb()
+    .prepare('SELECT is_refundable FROM rate_plans WHERE rate_plan_id = ?')
     .get(booking.rate_plan_id);
-  const hoursLeft = hoursUntilCheckIn(booking.check_in);
-  if (policy.free_cancel_hours !== null && hoursLeft >= policy.free_cancel_hours) return 0;
-  if (policy.penalty_percent === 0) {
-    // Flexible: штраф = вартість першої ночі
-    const nights = getDb().prepare('SELECT CAST(julianday(?) - julianday(?) AS INTEGER) AS n').get(booking.check_out, booking.check_in).n;
-    return roundMoney(booking.room_total / nights);
-  }
-  return roundMoney((booking.room_total * policy.penalty_percent) / 100);
+  return refundable === 1 ? 0 : booking.room_total;
 }
 
 // POST /bookings/:code/cancel
@@ -220,23 +213,12 @@ route('POST', '/bookings/:code/cancel', ({ params }) => {
   if (!['pending', 'confirmed'].includes(booking.status)) throw invalidTransition(booking.status, 'cancel');
 
   const penalty = calcPenalty(booking);
-  const { paid_total: paidTotal } = paymentSummary(booking);
-  const refund = Math.max(0, roundMoney(paidTotal - penalty));
+  // Гроші сервер не повертає: лише змінює статус і показує штраф
+  getDb()
+    .prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE booking_id = ?")
+    .run(nowDateTime(), booking.booking_id);
 
-  transaction((conn) => {
-    const now = nowDateTime();
-    conn.prepare("UPDATE bookings SET status = 'cancelled', cancelled_at = ? WHERE booking_id = ?").run(now, booking.booking_id);
-    if (refund > 0) {
-      const last = conn
-        .prepare("SELECT method FROM payments WHERE booking_id = ? AND status = 'paid' ORDER BY paid_at DESC, payment_id DESC LIMIT 1")
-        .get(booking.booking_id);
-      conn
-        .prepare("INSERT INTO payments (booking_id, amount, method, status, paid_at) VALUES (?, ?, ?, 'refunded', ?)")
-        .run(booking.booking_id, -refund, last ? last.method : 'card', now);
-    }
-  });
-
-  return { body: { ...bookingCard(booking.booking_id), cancellation: { penalty, refund_amount: refund } } };
+  return { body: { ...bookingCard(booking.booking_id), cancellation: { penalty } } };
 });
 
 // POST /bookings/:code/check-in

@@ -34,14 +34,6 @@ export function resetDatabase() {
       role          TEXT NOT NULL,              -- admin / receptionist
       is_active     INTEGER NOT NULL DEFAULT 1
     );
-    CREATE TABLE idempotency_keys (
-      booking_id    INTEGER NOT NULL REFERENCES bookings(booking_id),
-      key           TEXT NOT NULL,
-      payment_id    INTEGER NOT NULL REFERENCES payments(payment_id),
-      amount        REAL NOT NULL,
-      method        TEXT NOT NULL,
-      PRIMARY KEY (booking_id, key)
-    );
   `);
   const insert = db.prepare(
     'INSERT INTO staff_users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)',

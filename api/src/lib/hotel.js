@@ -34,20 +34,13 @@ export function findPromo(code) {
   return getDb().prepare('SELECT * FROM promo_codes WHERE upper(code) = upper(?)').get(code);
 }
 
-export function promoUsage(promo) {
-  const { used } = getDb()
-    .prepare("SELECT COUNT(*) AS used FROM bookings WHERE promo_id = ? AND status <> 'cancelled'")
-    .get(promo.promo_id);
-  return used;
-}
-
 // Чому промокод зараз не діє (або null, якщо діє). Порядок причин — як у специфікації.
+// max_uses у базі навмисно не перевіряється: ліміту використань немає.
 export function promoInvalidReason(promo) {
   const now = today();
   if (promo.is_active !== 1) return 'INACTIVE';
   if (now < promo.valid_from) return 'NOT_STARTED';
   if (now > promo.valid_to) return 'EXPIRED';
-  if (promo.max_uses !== null && promoUsage(promo) >= promo.max_uses) return 'EXHAUSTED';
   return null;
 }
 
@@ -79,7 +72,8 @@ export function isRoomFree(roomId, checkIn, checkOut) {
 }
 
 // ---------- Оплати ----------
-// paid_total = сума платежів paid і refunded (повернення мають від'ємну суму)
+// paid_total = сума платежів paid і refunded (повернення мають від'ємну суму).
+// refunded — лише старі записи в базі: API нових повернень не створює.
 export function paymentSummary(booking) {
   const { paid } = getDb()
     .prepare("SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE booking_id = ? AND status IN ('paid', 'refunded')")

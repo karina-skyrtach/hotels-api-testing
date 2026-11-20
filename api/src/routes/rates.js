@@ -3,7 +3,7 @@ import { route } from '../app.js';
 import { getDb } from '../db.js';
 import { ApiError } from '../lib/errors.js';
 import {
-  INACTIVE_STATUSES, calcRoomTotal, findPromo, promoInvalidReason, promoUsage, requireValidPromo, validateStay,
+  INACTIVE_STATUSES, calcRoomTotal, findPromo, promoInvalidReason, requireValidPromo, validateStay,
 } from '../lib/hotel.js';
 import { daysBetween } from '../lib/dates.js';
 import { Validator, parseIntStrict, readQuery } from '../lib/validate.js';
@@ -15,23 +15,11 @@ const ratePlanView = (rp) => ({
   price_modifier: rp.price_modifier,
   breakfast_included: rp.breakfast_included === 1,
   is_refundable: rp.is_refundable === 1,
-  cancellation_policy: {
-    policy_id: rp.policy_id,
-    name: rp.policy_name,
-    free_cancel_hours: rp.free_cancel_hours,
-    penalty_percent: rp.penalty_percent,
-  },
 });
 
 // GET /rate-plans
 route('GET', '/rate-plans', () => {
-  const rows = getDb()
-    .prepare(
-      `SELECT rp.*, cp.name AS policy_name, cp.free_cancel_hours, cp.penalty_percent
-       FROM rate_plans rp JOIN cancellation_policies cp ON cp.policy_id = rp.policy_id
-       ORDER BY rp.rate_plan_id`,
-    )
-    .all();
+  const rows = getDb().prepare('SELECT * FROM rate_plans ORDER BY rate_plan_id').all();
   return { body: { data: rows.map(ratePlanView) } };
 });
 
@@ -48,7 +36,6 @@ route('GET', '/promo-codes/:code/validate', ({ params }) => {
       discount_percent: promo.discount_percent,
       valid_from: promo.valid_from,
       valid_to: promo.valid_to,
-      uses_left: promo.max_uses === null ? null : promo.max_uses - promoUsage(promo),
     },
   };
 });

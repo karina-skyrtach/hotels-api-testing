@@ -2,7 +2,7 @@
 import { route } from '../app.js';
 import { getDb, transaction } from '../db.js';
 import { ApiError, conflict, referenceNotFound, validationError } from '../lib/errors.js';
-import { daysBetween, isValidDate, nowDateTime } from '../lib/dates.js';
+import { isValidDate, nowDateTime } from '../lib/dates.js';
 import { paymentSummary, roundMoney } from '../lib/hotel.js';
 import {
   Validator, isPositiveInt, paginated, parseIntStrict, readPagination, readQuery,
@@ -53,14 +53,6 @@ route('POST', '/bookings/:code/services', ({ params, body }) => {
   // Правила, які залежать від бронювання і послуги
   v.check(body.service_date >= booking.check_in && body.service_date <= booking.check_out,
     'service_date', `must be between ${booking.check_in} and ${booking.check_out}`);
-  if (service.unit === 'per_person') {
-    const people = booking.adults + booking.children;
-    v.check(body.quantity <= people, 'quantity', `must not exceed number of guests (${people}) for per_person service`);
-  }
-  if (service.unit === 'per_night') {
-    const nights = daysBetween(booking.check_in, booking.check_out);
-    v.check(body.quantity <= nights, 'quantity', `must not exceed number of nights (${nights}) for per_night service`);
-  }
   v.throwIfErrors();
 
   if (!ACTIVE_FOR_EXTRAS.includes(booking.status)) throw notActive(booking.status);
@@ -122,7 +114,7 @@ route('GET', '/bookings/:code/payments', ({ params }) => {
 const hasMaxTwoDecimals = (x) => Math.abs(Math.round(x * 100) - x * 100) < 1e-6;
 
 // POST /bookings/:code/payments
-route('POST', '/bookings/:code/payments', ({ params, body, headers }) => {
+route('POST', '/bookings/:code/payments', ({ params, body }) => {
   const v = new Validator();
   const { amount, method } = body;
   if (amount === undefined || amount === null) v.add('amount', 'is required');
@@ -133,27 +125,12 @@ route('POST', '/bookings/:code/payments', ({ params, body, headers }) => {
   if (method === undefined || method === null) v.add('method', 'is required');
   else v.check(PAYMENT_METHODS.includes(method), 'method', `must be one of: ${PAYMENT_METHODS.join(', ')}`);
 
-  const key = headers['idempotency-key'];
-  if (key !== undefined) {
-    v.check(key.length >= 1 && key.length <= 64, 'Idempotency-Key', 'must be 1-64 characters long');
-  }
   v.throwIfErrors();
 
   const booking = requireBooking(params.code);
   if (['cancelled', 'checked_out', 'no_show'].includes(booking.status)) throw notActive(booking.status);
 
   const db = getDb();
-  // Повторний запит з тим самим ключем → повертаємо перший платіж, новий не створюємо
-  if (key !== undefined) {
-    const saved = db.prepare('SELECT * FROM idempotency_keys WHERE booking_id = ? AND key = ?').get(booking.booking_id, key);
-    if (saved) {
-      if (saved.amount !== amount || saved.method !== method) {
-        throw conflict('IDEMPOTENCY_KEY_REUSED', 'This Idempotency-Key was already used with a different amount or method');
-      }
-      const payment = db.prepare('SELECT * FROM payments WHERE payment_id = ?').get(saved.payment_id);
-      return { status: 201, body: { payment: paymentView(payment), summary: paymentSummary(booking) } };
-    }
-  }
 
   const { balance_due: balance } = paymentSummary(booking);
   if (balance === 0) throw conflict('NOTHING_TO_PAY', 'Booking is already fully paid');
@@ -161,17 +138,10 @@ route('POST', '/bookings/:code/payments', ({ params, body, headers }) => {
     throw validationError([{ field: 'amount', message: `must not exceed balance_due (${balance})` }]);
   }
 
-  const paymentId = transaction((conn) => {
-    const res = conn
-      .prepare("INSERT INTO payments (booking_id, amount, method, status, paid_at) VALUES (?, ?, ?, 'paid', ?)")
-      .run(booking.booking_id, amount, method, nowDateTime());
-    const id = Number(res.lastInsertRowid);
-    if (key !== undefined) {
-      conn.prepare('INSERT INTO idempotency_keys (booking_id, key, payment_id, amount, method) VALUES (?, ?, ?, ?, ?)')
-        .run(booking.booking_id, key, id, amount, method);
-    }
-    return id;
-  });
+  const res = db
+    .prepare("INSERT INTO payments (booking_id, amount, method, status, paid_at) VALUES (?, ?, ?, 'paid', ?)")
+    .run(booking.booking_id, amount, method, nowDateTime());
+  const paymentId = Number(res.lastInsertRowid);
 
   const payment = db.prepare('SELECT * FROM payments WHERE payment_id = ?').get(paymentId);
   return { status: 201, body: { payment: paymentView(payment), summary: paymentSummary(booking) } };

@@ -43,4 +43,14 @@ npm run db:reset   # restore the database to its initial state (stop the server 
 | Payments | `GET /bookings/:code/payments`, `POST /bookings/:code/payments` |
 | Reviews | `GET /reviews`, `POST /bookings/:code/review` |
 
-Full specification: [Hotels API — specification (Stage 2)](https://claude.ai/artifact/RXbViqY616x3HJSpxthGuf).
+## Business rules (money)
+
+- Cancellation penalty depends only on the rate plan: `is_refundable = true` → 0, `false` → 100% of `room_total`.
+- The API does not create refunds; cancelling only changes the status and shows the penalty.
+- Partial payments are allowed; a payment larger than `balance_due` → 400.
+- No `Idempotency-Key`, no usage limit for promo codes, service `quantity` is 1–20.
+
+## Documentation
+
+- Full specification and test scenarios: [Hotels API Hub](https://claude.ai/artifact/8bTwpWBxNdGbwSVSuCExm1) (private, available to the author only).
+- Test cases: [docs/api-cases.md](../docs/api-cases.md).
